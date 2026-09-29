@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { LogOut, Menu, PackageOpen, Settings, Truck, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
@@ -7,6 +7,12 @@ import { supabase } from "@/lib/supabase";
 
 export function AppHeader() {
   const { user, role, signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await signOut();
+    navigate({ to: '/login', replace: true });
+  };
 
   const userEmail = user?.email || "";
   const displayName = user?.user_metadata?.display_name || userEmail;
@@ -74,7 +80,7 @@ export function AppHeader() {
               <p className="text-[11px] text-muted-foreground">{role || 'Sem nível'}</p>
             </div>
             <span className="grid size-9 place-items-center rounded-full bg-accent/15 font-display text-[13px] font-bold text-accent">{initials}</span>
-            <Button variant="ghost" size="icon" className="size-8 text-muted-foreground hover:text-destructive" onClick={signOut} title="Sair">
+            <Button variant="ghost" size="icon" className="size-8 text-muted-foreground hover:text-destructive" onClick={handleLogout} title="Sair">
               <LogOut className="size-4" />
             </Button>
           </div>

@@ -9,7 +9,7 @@ import { Camera, Eraser, Check, FileUp, FileText, Loader2, X, Plus } from "lucid
 
 export type DeliverySignatureResult = {
   photos: File[];
-  signatureDriver: string; // base64
+  signatureDriver?: string; // base64
   signatureNurse: string; // base64
   checklistFile: File | null;
 };
@@ -27,6 +27,8 @@ export function DeliverySignatureDialog({ open, onOpenChange, title, description
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [isCompressing, setIsCompressing] = useState(false);
   const [checklistFile, setChecklistFile] = useState<File | null>(null);
+  
+  const isWithdrawal = title.toLowerCase().includes('retirada');
   
   const sigDriverCanvas = useRef<SignatureCanvas>(null);
   const sigNurseCanvas = useRef<SignatureCanvas>(null);
@@ -81,20 +83,21 @@ export function DeliverySignatureDialog({ open, onOpenChange, title, description
   };
 
   const isFormValid = () => {
+    const driverValid = isWithdrawal ? true : (sigDriverCanvas.current && !sigDriverCanvas.current.isEmpty());
     return photos.length > 0 && 
-           sigDriverCanvas.current && !sigDriverCanvas.current.isEmpty() &&
+           driverValid &&
            sigNurseCanvas.current && !sigNurseCanvas.current.isEmpty();
   };
 
   const handleSave = () => {
     if (!isFormValid()) return;
 
-    const signatureDriverBase64 = sigDriverCanvas.current?.getTrimmedCanvas().toDataURL('image/png');
+    const signatureDriverBase64 = !isWithdrawal ? sigDriverCanvas.current?.getTrimmedCanvas().toDataURL('image/png') : undefined;
     const signatureNurseBase64 = sigNurseCanvas.current?.getTrimmedCanvas().toDataURL('image/png');
     
     onSave({
       photos,
-      signatureDriver: signatureDriverBase64!,
+      signatureDriver: signatureDriverBase64,
       signatureNurse: signatureNurseBase64!,
       checklistFile,
     });
@@ -162,65 +165,69 @@ export function DeliverySignatureDialog({ open, onOpenChange, title, description
           </div>
 
           {/* ARQUIVO CHECKLIST */}
-          <div className="space-y-3">
-            <Label className="text-base font-semibold flex items-center gap-2">
-              <span className="grid size-6 place-items-center rounded-full bg-primary/20 text-primary text-xs">2</span>
-              Arquivo de Checklist (Opcional)
-            </Label>
-            <div className="rounded-xl border border-dashed border-border/50 bg-muted/30 p-4 text-center transition-colors hover:bg-muted/50">
-              <Input 
-                type="file" 
-                accept=".pdf,.doc,.docx" 
-                className="hidden" 
-                id="checklist-input-delivery"
-                onChange={handleFileChange}
-              />
-              <Label htmlFor="checklist-input-delivery" className="cursor-pointer flex flex-col items-center gap-2">
-                {checklistFile ? (
-                  <div className="flex flex-col items-center gap-2">
-                    <FileText className="size-8 text-primary" />
-                    <span className="text-sm font-medium text-foreground break-all px-4">{checklistFile.name}</span>
-                  </div>
-                ) : (
-                  <>
-                    <FileUp className="size-8 text-muted-foreground" />
-                    <span className="text-sm font-medium text-foreground">Anexar .PDF ou .WORD</span>
-                  </>
-                )}
+          {!isWithdrawal && (
+            <div className="space-y-3">
+              <Label className="text-base font-semibold flex items-center gap-2">
+                <span className="grid size-6 place-items-center rounded-full bg-primary/20 text-primary text-xs">2</span>
+                Arquivo de Checklist (Opcional)
               </Label>
-              {checklistFile && (
-                <Button variant="ghost" size="sm" className="mt-2 text-destructive" onClick={() => setChecklistFile(null)}>
-                  Remover Arquivo
-                </Button>
-              )}
+              <div className="rounded-xl border border-dashed border-border/50 bg-muted/30 p-4 text-center transition-colors hover:bg-muted/50">
+                <Input 
+                  type="file" 
+                  accept=".pdf,.doc,.docx" 
+                  className="hidden" 
+                  id="checklist-input-delivery"
+                  onChange={handleFileChange}
+                />
+                <Label htmlFor="checklist-input-delivery" className="cursor-pointer flex flex-col items-center gap-2">
+                  {checklistFile ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <FileText className="size-8 text-primary" />
+                      <span className="text-sm font-medium text-foreground break-all px-4">{checklistFile.name}</span>
+                    </div>
+                  ) : (
+                    <>
+                      <FileUp className="size-8 text-muted-foreground" />
+                      <span className="text-sm font-medium text-foreground">Anexar .PDF ou .WORD</span>
+                    </>
+                  )}
+                </Label>
+                {checklistFile && (
+                  <Button variant="ghost" size="sm" className="mt-2 text-destructive" onClick={() => setChecklistFile(null)}>
+                    Remover Arquivo
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* ASSINATURA MOTORISTA */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label className="text-base font-semibold flex items-center gap-2">
-                <span className="grid size-6 place-items-center rounded-full bg-primary/20 text-primary text-xs">3</span>
-                Assinatura do Motorista
-              </Label>
-              <Button type="button" variant="ghost" size="sm" onClick={handleClearSignatureDriver} className="h-8 text-xs text-muted-foreground">
-                <Eraser className="size-3 mr-1" /> Limpar
-              </Button>
+          {!isWithdrawal && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-base font-semibold flex items-center gap-2">
+                  <span className="grid size-6 place-items-center rounded-full bg-primary/20 text-primary text-xs">3</span>
+                  Assinatura do Motorista
+                </Label>
+                <Button type="button" variant="ghost" size="sm" onClick={handleClearSignatureDriver} className="h-8 text-xs text-muted-foreground">
+                  <Eraser className="size-3 mr-1" /> Limpar
+                </Button>
+              </div>
+              <div className="rounded-xl border border-border/50 bg-white overflow-hidden shadow-inner">
+                <SignatureCanvas 
+                  ref={sigDriverCanvas} 
+                  penColor="black"
+                  canvasProps={{ className: "w-full h-32 cursor-crosshair" }} 
+                />
+              </div>
             </div>
-            <div className="rounded-xl border border-border/50 bg-white overflow-hidden shadow-inner">
-              <SignatureCanvas 
-                ref={sigDriverCanvas} 
-                penColor="black"
-                canvasProps={{ className: "w-full h-32 cursor-crosshair" }} 
-              />
-            </div>
-          </div>
+          )}
 
           {/* ASSINATURA ENFERMEIRA */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <Label className="text-base font-semibold flex items-center gap-2">
-                <span className="grid size-6 place-items-center rounded-full bg-primary/20 text-primary text-xs">4</span>
+                <span className="grid size-6 place-items-center rounded-full bg-primary/20 text-primary text-xs">{isWithdrawal ? "2" : "4"}</span>
                 Assinatura do Hospital (Enfermeira/Recepção)
               </Label>
               <Button type="button" variant="ghost" size="sm" onClick={handleClearSignatureNurse} className="h-8 text-xs text-muted-foreground">

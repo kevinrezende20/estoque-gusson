@@ -1,10 +1,11 @@
 import { format } from "date-fns";
-import { ChevronLeft, Plus, CheckCircle, Clock, AlertTriangle, Minus, XCircle, FileText, ArrowRight } from "lucide-react";
+import { ChevronLeft, Plus, CheckCircle, Clock, AlertTriangle, Minus, XCircle, FileText, ArrowRight, Upload, Trash } from "lucide-react";
 import { useState, type FormEvent, useMemo } from "react";
 import { Link } from "@tanstack/react-router";
 import { DatePicker } from "@/components/hospital/date-picker";
 import { ChecklistSignatureDialog, type ChecklistSignatureResult } from "./ChecklistSignatureDialog";
 import { MaterialDocumentsDialog } from "./MaterialDocumentsDialog";
+import { DeliverySignatureDialog, type DeliverySignatureResult } from "./DeliverySignatureDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -153,7 +154,46 @@ function MaterialsTable({ materials, allHospitals, canApprove, onApprove, onWith
   onWithdraw: (id: string, amount: number, reason: string, destId: string | null, comment: string) => void;
   onApproveWithdraw: (id: string, approve: boolean) => void;
   onStandby: (id: string) => void;
+  onDelete: (id: string) => void;
 }) {
+  const { user, role } = useAuth();
+  const queryClient = useQueryClient();
+  const [signatureMat, setSignatureMat] = useState<DBMaterial | null>(null);
+  const [signatureOpen, setSignatureOpen] = useState(false);
+
+  const handleSignatureSave = async (result: DeliverySignatureResult) => {
+    if (!signatureMat || !user) return;
+    
+    try {
+      const type = 'entrega';
+      for (const photo of result.photos) {
+        await uploadMaterialDocument(signatureMat.id, user.id, 'foto', type, photo);
+      }
+      if (result.signatureDriver) {
+        await uploadMaterialDocument(signatureMat.id, user.id, 'assinatura', type, result.signatureDriver);
+      }
+      if (result.signatureNurse) {
+        await uploadMaterialDocument(signatureMat.id, user.id, 'assinatura', type, result.signatureNurse); 
+      }
+      if (result.checklistFile) {
+        await uploadMaterialDocument(signatureMat.id, user.id, 'checklist', type, result.checklistFile);
+      }
+
+      // Always change to 'Pendente de verificação' so Admin reviews it
+      const { error } = await supabase.from('materials').update({ status: 'Pendente de verificação' }).eq('id', signatureMat.id);
+      if (error) throw error;
+
+      logAuditAction(user.id, signatureMat.hospital_id, signatureMat.name, `Anexo de Documentos (${signatureMat.status === 'Em trânsito' ? 'Confirmação de Entrega' : 'Documentação Extra'})`, { boxes: signatureMat.boxes });
+      queryClient.invalidateQueries({ queryKey: ['materials'] });
+
+    } catch (err: any) {
+      alert("Erro ao enviar documentos: " + err.message);
+    } finally {
+      setSignatureOpen(false);
+      setSignatureMat(null);
+    }
+  };
+
   if (materials.length === 0) {
     return <div className="px-6 py-10 text-center text-sm text-muted-foreground">Nenhum material cadastrado nesta seção.</div>;
   }
@@ -250,9 +290,26 @@ function MaterialsTable({ materials, allHospitals, canApprove, onApprove, onWith
                     )}
 
                     {!isPendingAdd && !isPendingWithdraw && (
-                      <div className="flex items-center gap-2">
-                        <MaterialDocumentsDialog materialId={material.id} materialName={material.name} />
-                        <WithdrawMaterialDialog material={material} allHospitals={allHospitals} onWithdraw={onWithdraw} />
+                      <div className="flex flex-col items-end gap-2">
+                        {material.status === 'Em trânsito' && (
+                          <Button size="sm" variant="default" className="h-7 rounded-lg text-[11px] bg-blue-600 hover:bg-blue-700" onClick={() => { setSignatureMat(material); setSignatureOpen(true); }}>
+                            <Upload className="size-3 mr-1" />Confirmar Entrega
+                          </Button>
+                        )}
+                        {material.status === 'Entregue' && (
+                          <Button size="sm" variant="outline" className="h-7 rounded-lg text-[11px]" onClick={() => { setSignatureMat(material); setSignatureOpen(true); }}>
+                            <Upload className="size-3 mr-1" />Anexar Documentos
+                          </Button>
+                        )}
+                        <div className="flex items-center gap-2">
+                          <MaterialDocumentsDialog materialId={material.id} materialName={material.name} />
+                          <WithdrawMaterialDialog material={material} allHospitals={allHospitals} onWithdraw={onWithdraw} />
+                          {role === 'Admin' && (
+                            <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10 shrink-0" onClick={() => onDelete(material.id)}>
+                              <Trash className="size-4" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -263,6 +320,16 @@ function MaterialsTable({ materials, allHospitals, canApprove, onApprove, onWith
         })}
       </TableBody>
     </Table>
+    {signatureMat && (
+      <DeliverySignatureDialog
+        open={signatureOpen}
+        onOpenChange={setSignatureOpen}
+        title={signatureMat.status === 'Em trânsito' ? 'Documentação de Entrega' : 'Anexar Documentos'}
+        description={`Adicione fotos, assinaturas e checklists para o material ${signatureMat.name}.`}
+        onSave={handleSignatureSave}
+      />
+    )}
+    </>
   );
 }
 
@@ -397,8 +464,8 @@ function AddMaterialDialog({ hospitalId, hospitalName, section, stockType, userR
   );
 }
 
-function StockSection({ hospitalId, hospitalName, section, stockType, materials, allHospitals, canApprove, userRole, onApprove, onWithdraw, onApproveWithdraw, onStandby }: {
-  hospitalId: string; hospitalName: string; section: "CME" | "OPME"; stockType: "transitorio" | "consignado"; materials: DBMaterial[]; allHospitals: DBHospital[]; canApprove: boolean; userRole: string | null; onApprove: (id: string) => void; onWithdraw: (id: string, amount: number, reason: string, destId: string | null, comment: string) => void; onApproveWithdraw: (id: string, approve: boolean) => void; onStandby: (id: string) => void;
+function StockSection({ hospitalId, hospitalName, section, stockType, materials, allHospitals, canApprove, userRole, onApprove, onWithdraw, onApproveWithdraw, onStandby, onDelete }: {
+  hospitalId: string; hospitalName: string; section: "CME" | "OPME"; stockType: "transitorio" | "consignado"; materials: DBMaterial[]; allHospitals: DBHospital[]; canApprove: boolean; userRole: string | null; onApprove: (id: string) => void; onWithdraw: (id: string, amount: number, reason: string, destId: string | null, comment: string) => void; onApproveWithdraw: (id: string, approve: boolean) => void; onStandby: (id: string) => void; onDelete: (id: string) => void;
 }) {
   const stockLabel = stockType === "transitorio" ? "Transitório" : "Consignado";
   const pendingAddCount = materials.filter(m => !m.is_approved).length;
@@ -414,7 +481,7 @@ function StockSection({ hospitalId, hospitalName, section, stockType, materials,
         </div>
         <AddMaterialDialog hospitalId={hospitalId} hospitalName={hospitalName} section={section} stockType={stockType} userRole={userRole} />
       </div>
-      <MaterialsTable materials={materials} allHospitals={allHospitals} canApprove={canApprove} onApprove={onApprove} onWithdraw={onWithdraw} onApproveWithdraw={onApproveWithdraw} onStandby={onStandby} />
+      <MaterialsTable materials={materials} allHospitals={allHospitals} canApprove={canApprove} onApprove={onApprove} onWithdraw={onWithdraw} onApproveWithdraw={onApproveWithdraw} onStandby={onStandby} onDelete={onDelete} />
     </section>
   );
 }
@@ -456,6 +523,22 @@ export function HospitalDetail({ hospitalId }: { hospitalId: string }) {
 
   const canApprove = ['Admin', 'Estoque', 'Conferente'].includes(role || '');
   const isMotorista = role === "Motorista";
+
+  const handleDelete = async (materialId: string) => {
+    if (role !== 'Admin') return;
+    if (!confirm("Tem certeza que deseja excluir este material permanentemente?")) return;
+    
+    const material = allMaterials.find(m => m.id === materialId);
+    const { error } = await supabase.from('materials').delete().eq('id', materialId);
+    
+    if (error) {
+      alert("Erro ao excluir: " + error.message);
+    } else {
+      if (user && material) logAuditAction(user.id, hospitalId, material.name, 'Exclusão de Material (Admin)', { boxes: material.boxes });
+      queryClient.invalidateQueries({ queryKey: ['materials', hospitalId] });
+      queryClient.invalidateQueries({ queryKey: ['materials'] });
+    }
+  };
 
   const handleApprove = async (materialId: string) => {
     const material = allMaterials.find(m => m.id === materialId);
@@ -695,6 +778,7 @@ export function HospitalDetail({ hospitalId }: { hospitalId: string }) {
               onWithdraw={handleWithdrawRequest}
               onApproveWithdraw={handleApproveWithdraw}
               onStandby={setStandbyMaterialId}
+              onDelete={handleDelete}
             />
             <StockSection
               hospitalId={hospitalId}
@@ -709,6 +793,7 @@ export function HospitalDetail({ hospitalId }: { hospitalId: string }) {
               onWithdraw={handleWithdrawRequest}
               onApproveWithdraw={handleApproveWithdraw}
               onStandby={setStandbyMaterialId}
+              onDelete={handleDelete}
             />
           </TabsContent>
           );

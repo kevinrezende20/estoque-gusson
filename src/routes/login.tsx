@@ -4,9 +4,11 @@ import { supabase } from '@/lib/supabase'
 
 export const Route = createFileRoute('/login')({
   beforeLoad: async () => {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (session) {
-      throw redirect({ to: '/' })
+    if (typeof window !== 'undefined') {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        throw redirect({ to: '/' });
+      }
     }
   },
   component: LoginPage,
