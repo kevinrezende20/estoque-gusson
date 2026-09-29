@@ -65,7 +65,7 @@ function Index() {
   }, [query, hospitals]);
 
   const pendingMaterials = useMemo(() => {
-    return materials.filter(m => !m.is_approved || m.pending_withdrawal_boxes > 0 || m.status === 'Standby');
+    return materials.filter(m => !m.is_approved || m.pending_withdrawal_boxes > 0 || m.status === 'Standby' || m.status === 'Pendente de verificação');
   }, [materials]);
 
   const handleStandby = async () => {
@@ -93,13 +93,26 @@ function Index() {
   };
 
   const handleApproveAdd = async (materialId: string) => {
+    const material = materials.find(m => m.id === materialId);
+    
+    // If it's just 'Pendente de verificação' (Delivery), change it directly to 'Entregue'
+    if (material?.status === 'Pendente de verificação') {
+      const { error } = await supabase.from('materials').update({ status: 'Entregue' }).eq('id', materialId);
+      if (error) {
+        alert("Erro ao aprovar verificação de entrega: " + error.message);
+      } else {
+        if (user) logAuditAction(user.id, material.hospital_id, material.name, 'Entrega Confirmada (Pós-Verificação)', { material_id: materialId, boxes: material.boxes });
+        queryClient.invalidateQueries({ queryKey: ['materials'] });
+      }
+      return;
+    }
+
     const { error } = await supabase.from('materials').update({ is_approved: true, status: 'Em trânsito' }).eq('id', materialId);
     if (error) {
       alert("Erro ao aprovar: " + error.message);
     } else {
-      if (user) {
-        const material = materials.find(m => m.id === materialId);
-        if (material) logAuditAction(user.id, material.hospital_id, material.name, 'Aprovação de Entrada (Painel)', { material_id: materialId, boxes: material.boxes });
+      if (user && material) {
+        logAuditAction(user.id, material.hospital_id, material.name, 'Aprovação de Entrada (Painel)', { material_id: materialId, boxes: material.boxes });
       }
       queryClient.invalidateQueries({ queryKey: ['materials'] });
     }
@@ -141,6 +154,7 @@ function Index() {
       } else {
         const { error } = await supabase.from('materials').update({ 
           boxes: newBoxes, 
+          status: material.status === 'Pendente de verificação' ? 'Entregue' : material.status,
           pending_withdrawal_boxes: 0,
           pending_withdrawal_reason: null,
           pending_withdrawal_hospital_id: null,
@@ -161,6 +175,7 @@ function Index() {
     } else {
       const { error } = await supabase.from('materials').update({ 
         pending_withdrawal_boxes: 0,
+        status: material.status === 'Pendente de verificação' ? 'Entregue' : material.status,
         pending_withdrawal_reason: null,
         pending_withdrawal_hospital_id: null,
         pending_withdrawal_comment: null
@@ -207,6 +222,8 @@ function Index() {
                 const destHospital = mat.pending_withdrawal_hospital_id ? hospitals.find(h => h.id === mat.pending_withdrawal_hospital_id) : null;
                 const isAdd = !mat.is_approved;
                 const isStandby = mat.status === 'Standby';
+                const isVerifiedDelivery = mat.status === 'Pendente de verificação' && mat.pending_withdrawal_boxes === 0;
+                const isVerifiedWithdrawal = mat.status === 'Pendente de verificação' && mat.pending_withdrawal_boxes > 0;
                 
                 return (
                   <div key={`${mat.id}-${isAdd ? 'add' : 'withdraw'}`} className={`flex flex-col justify-between rounded-2xl border bg-card p-4 shadow-sm transition-all hover:shadow-md ${isStandby ? 'border-orange-500/50 hover:border-orange-500/80 bg-orange-50/50' : 'border-border/50 hover:border-warning/50'}`}>
@@ -216,6 +233,10 @@ function Index() {
                           <span className="flex items-center gap-1 rounded-md bg-orange-500/15 px-2 py-0.5 text-[10px] font-medium text-orange-600"><AlertCircle className="size-3" /> Em Standby</span>
                         ) : isAdd ? (
                           <span className="flex items-center gap-1 rounded-md bg-warning/15 px-2 py-0.5 text-[10px] font-medium text-warning"><Clock className="size-3" /> Nova Entrada</span>
+                        ) : isVerifiedDelivery ? (
+                          <span className="flex items-center gap-1 rounded-md bg-blue-500/15 px-2 py-0.5 text-[10px] font-medium text-blue-600"><CheckCircle className="size-3" /> Verificar Entrega</span>
+                        ) : isVerifiedWithdrawal ? (
+                          <span className="flex items-center gap-1 rounded-md bg-orange-500/15 px-2 py-0.5 text-[10px] font-medium text-orange-600"><CheckCircle className="size-3" /> Verificar Retirada</span>
                         ) : (
                           <span className="flex items-center gap-1 rounded-md bg-destructive/15 px-2 py-0.5 text-[10px] font-medium text-destructive"><Minus className="size-3" /> Retirada Pendente</span>
                         )}
@@ -232,16 +253,16 @@ function Index() {
 
                       {(!isAdd || isStandby) && (
                         <div className="mt-2 rounded-lg bg-muted/50 p-2 text-[11px] text-muted-foreground">
-                          {!isAdd && <p><strong className="font-medium text-foreground">Destino:</strong> {mat.pending_withdrawal_reason === 'hospital' ? `Transferência p/ ${destHospital?.name}` : 'Retorno ao Estoque'}</p>}
+                          {!isAdd && mat.pending_withdrawal_boxes > 0 && <p><strong className="font-medium text-foreground">Destino:</strong> {mat.pending_withdrawal_reason === 'hospital' ? `Transferência p/ ${destHospital?.name}` : 'Retorno ao Estoque'}</p>}
                           {mat.pending_withdrawal_comment && <p className="mt-1 italic">"{mat.pending_withdrawal_comment}"</p>}
                         </div>
                       )}
                     </div>
 
                     <div className="mt-4 flex flex-col gap-3 border-t border-border/50 pt-3">
-                      <span className="text-xs font-medium text-foreground">{isAdd ? mat.boxes : mat.pending_withdrawal_boxes} caixas pendentes</span>
+                      <span className="text-xs font-medium text-foreground">{isAdd || isVerifiedDelivery ? mat.boxes : mat.pending_withdrawal_boxes} caixas pendentes</span>
                       
-                      {isAdd ? (
+                      {isAdd || isVerifiedDelivery ? (
                         <div className="flex items-center gap-2">
                           {!isStandby && (
                             <Button size="sm" variant="outline" className="h-8 flex-1 border-orange-500/30 text-orange-600 hover:bg-orange-500/10" onClick={() => setStandbyMaterialId(mat.id)}>
@@ -249,7 +270,7 @@ function Index() {
                             </Button>
                           )}
                           <Button size="sm" variant="outline" className="h-8 flex-1 border-accent/30 text-accent hover:bg-accent/10" onClick={() => handleApproveAdd(mat.id)}>
-                            <CheckCircle className="size-3 mr-1.5" /> Aprovar Entrada
+                            <CheckCircle className="size-3 mr-1.5" /> Aprovar
                           </Button>
                         </div>
                       ) : (

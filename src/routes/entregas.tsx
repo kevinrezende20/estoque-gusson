@@ -2,13 +2,14 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { AppHeader } from "@/components/hospital/app-header";
 import { supabase } from "@/lib/supabase";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { DBHospital, DBMaterial, logAuditAction } from "@/lib/queries";
+import { DBHospital, DBMaterial, logAuditAction, uploadMaterialDocument } from "@/lib/queries";
 import { useAuth } from "@/hooks/useAuth";
-import { Truck, MapPin, CheckCircle, Search, Building2, Package } from "lucide-react";
+import { Truck, MapPin, Search, Building2, Package, Upload, ArrowUpFromLine, ArrowDownToLine, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { DeliverySignatureDialog, type DeliverySignatureResult } from "@/components/hospital/DeliverySignatureDialog";
 
 export const Route = createFileRoute("/entregas")({
   beforeLoad: async () => {
@@ -29,6 +30,9 @@ function EntregasPage() {
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [isProcessing, setIsProcessing] = useState<string | null>(null);
+  
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [selectedMaterial, setSelectedMaterial] = useState<{ mat: DBMaterial, type: 'entrega' | 'retirada' } | null>(null);
 
   const { data: hospitals = [] } = useQuery({
     queryKey: ['hospitals'],
@@ -42,15 +46,24 @@ function EntregasPage() {
   const { data: materials = [] } = useQuery({
     queryKey: ['materials_transit'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('materials').select('*').eq('status', 'Em trânsito').eq('is_approved', true);
+      // Pega todos os materiais aprovados e filtra no cliente para cobrir entregas e retiradas
+      const { data, error } = await supabase.from('materials').select('*').eq('is_approved', true);
       if (error) throw error;
       return data as DBMaterial[];
     }
   });
 
-  const transitMaterials = useMemo(() => {
+  const activeMaterials = useMemo(() => {
+    return materials.filter(m => 
+      (m.status === 'Em trânsito') || 
+      (m.status === 'Pendente de verificação') ||
+      (m.pending_withdrawal_boxes > 0)
+    );
+  }, [materials]);
+
+  const filteredMaterials = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase("pt-BR");
-    let result = materials;
+    let result = activeMaterials;
     if (normalized) {
       result = result.filter(m => {
         const hospital = hospitals.find(h => h.id === m.hospital_id);
@@ -61,12 +74,11 @@ function EntregasPage() {
       });
     }
     return result;
-  }, [materials, hospitals, query]);
+  }, [activeMaterials, hospitals, query]);
 
-  // Agrupar por hospital
   const groupedByHospital = useMemo(() => {
     const groups: Record<string, { hospital: DBHospital, materials: DBMaterial[] }> = {};
-    transitMaterials.forEach(mat => {
+    filteredMaterials.forEach(mat => {
       if (!groups[mat.hospital_id]) {
         const hosp = hospitals.find(h => h.id === mat.hospital_id);
         if (hosp) {
@@ -78,25 +90,47 @@ function EntregasPage() {
       }
     });
     return Object.values(groups);
-  }, [transitMaterials, hospitals]);
+  }, [filteredMaterials, hospitals]);
 
-  const handleDeliver = async (material: DBMaterial) => {
-    if (!confirm(`Confirmar entrega de ${material.name}?`)) return;
-    setIsProcessing(material.id);
+  const handleActionClick = (mat: DBMaterial, type: 'entrega' | 'retirada') => {
+    setSelectedMaterial({ mat, type });
+    setDialogOpen(true);
+  };
+
+  const handleSaveSignature = async (result: DeliverySignatureResult) => {
+    if (!selectedMaterial || !user) return;
+    const { mat, type } = selectedMaterial;
+    
+    setDialogOpen(false);
+    setIsProcessing(mat.id);
 
     try {
-      const { error } = await supabase.from('materials').update({ status: 'Entregue' }).eq('id', material.id);
+      for (const photo of result.photos) {
+        await uploadMaterialDocument(mat.id, user.id, 'foto', type, photo);
+      }
+      
+      if (result.signatureDriver) {
+        await uploadMaterialDocument(mat.id, user.id, 'assinatura', type, result.signatureDriver);
+      }
+      if (result.signatureNurse) {
+        await uploadMaterialDocument(mat.id, user.id, 'assinatura', type, result.signatureNurse); 
+      }
+
+      if (result.checklistFile) {
+        await uploadMaterialDocument(mat.id, user.id, 'checklist', type, result.checklistFile);
+      }
+
+      const { error } = await supabase.from('materials').update({ status: 'Pendente de verificação' }).eq('id', mat.id);
       if (error) throw error;
 
-      if (user) {
-        logAuditAction(user.id, material.hospital_id, material.name, 'Entrega Confirmada', { boxes: material.boxes });
-      }
+      logAuditAction(user.id, mat.hospital_id, mat.name, `Verificação de ${type === 'entrega' ? 'Entrega' : 'Retirada'} (Motorista)`, { boxes: mat.boxes });
 
       queryClient.invalidateQueries({ queryKey: ['materials_transit'] });
     } catch (err: any) {
-      alert("Erro ao confirmar entrega: " + err.message);
+      alert("Erro ao confirmar e enviar documentos: " + err.message);
     } finally {
       setIsProcessing(null);
+      setSelectedMaterial(null);
     }
   };
 
@@ -107,9 +141,9 @@ function EntregasPage() {
         <div>
           <p className="mb-1 text-xs font-semibold uppercase tracking-[0.14em] text-primary">Logística</p>
           <h1 className="font-display text-2xl font-bold sm:text-3xl flex items-center gap-2">
-            <Truck className="size-6 text-primary" /> Minhas Entregas
+            <Truck className="size-6 text-primary" /> Minha Rota
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">Confirme a entrega de materiais que estão em rota.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Confirme entregas e retiradas pendentes.</p>
         </div>
 
         <div className="relative">
@@ -125,11 +159,11 @@ function EntregasPage() {
         {groupedByHospital.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-border py-16 text-center">
             <div className="grid size-12 place-items-center rounded-full bg-muted text-muted-foreground mb-4">
-              <CheckCircle className="size-6" />
+              <Truck className="size-6" />
             </div>
-            <h3 className="font-display text-lg font-medium">Tudo entregue!</h3>
+            <h3 className="font-display text-lg font-medium">Rota finalizada!</h3>
             <p className="text-sm text-muted-foreground max-w-xs mt-1">
-              Não há materiais em trânsito no momento ou a sua busca não encontrou resultados.
+              Não há materiais pendentes para entrega ou retirada.
             </p>
           </div>
         ) : (
@@ -153,42 +187,70 @@ function EntregasPage() {
                 </div>
                 
                 <div className="divide-y divide-border">
-                  {materials.map(mat => (
-                    <div key={mat.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-4">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <Badge className="bg-primary/10 text-primary border-primary/20 hover:bg-primary/20 text-[10px] uppercase">
-                            {mat.section}
-                          </Badge>
-                          <span className="text-[10px] font-medium text-muted-foreground uppercase">{mat.stock_type}</span>
+                  {materials.map(mat => {
+                    const isPendenteVerificacao = mat.status === 'Pendente de verificação';
+                    const isEntrega = (mat.status === 'Em trânsito' || (isPendenteVerificacao && mat.pending_withdrawal_boxes === 0));
+                    const isRetirada = (mat.pending_withdrawal_boxes > 0 && !isEntrega) || (isPendenteVerificacao && mat.pending_withdrawal_boxes > 0);
+                    
+                    return (
+                      <div key={mat.id} className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-4 transition-colors ${isPendenteVerificacao ? 'bg-muted/10 opacity-80' : 'hover:bg-muted/30'}`}>
+                        <div>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            {isEntrega && (
+                              <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20 text-[10px] uppercase">
+                                <ArrowDownToLine className="size-3 mr-1" /> Entrega
+                              </Badge>
+                            )}
+                            {isRetirada && (
+                              <Badge className="bg-orange-500/10 text-orange-600 border-orange-500/20 text-[10px] uppercase">
+                                <ArrowUpFromLine className="size-3 mr-1" /> Retirada
+                              </Badge>
+                            )}
+                            <span className="text-[10px] font-medium text-muted-foreground uppercase">{mat.section} · {mat.stock_type}</span>
+                          </div>
+                          <h3 className="font-medium text-sm text-foreground flex items-center gap-1.5">
+                            <Package className="size-3.5 text-muted-foreground" />
+                            {mat.name}
+                          </h3>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {isEntrega ? mat.boxes : mat.pending_withdrawal_boxes} caixa(s)
+                          </p>
                         </div>
-                        <h3 className="font-medium text-sm text-foreground flex items-center gap-1.5">
-                          <Package className="size-3.5 text-muted-foreground" />
-                          {mat.name}
-                        </h3>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {mat.boxes} caixa{mat.boxes !== 1 && 's'}
-                        </p>
+                        
+                        <Button 
+                          onClick={() => handleActionClick(mat, isEntrega ? 'entrega' : 'retirada')}
+                          disabled={isProcessing === mat.id || isPendenteVerificacao}
+                          variant={isPendenteVerificacao ? "outline" : "default"}
+                          className={`w-full sm:w-auto shadow-sm ${!isPendenteVerificacao && (isEntrega ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-orange-600 hover:bg-orange-700 text-white')}`}
+                        >
+                          {isProcessing === mat.id ? (
+                            <><Loader2 className="size-4 mr-2 animate-spin" /> Processando...</>
+                          ) : isPendenteVerificacao ? (
+                            <><Loader2 className="size-4 mr-2" /> Pendente de verificação</>
+                          ) : (
+                            <>
+                              <Upload className="size-4 mr-2" />
+                              {isEntrega ? 'Confirmar Entrega' : 'Confirmar Retirada'}
+                            </>
+                          )}
+                        </Button>
                       </div>
-                      
-                      <Button 
-                        onClick={() => handleDeliver(mat)}
-                        disabled={isProcessing === mat.id}
-                        className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white shadow-sm"
-                      >
-                        {isProcessing === mat.id ? "Processando..." : (
-                          <>
-                            <CheckCircle className="size-4 mr-2" />
-                            Entregue
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </section>
             ))}
           </div>
+        )}
+
+        {selectedMaterial && (
+          <DeliverySignatureDialog
+            open={dialogOpen}
+            onOpenChange={setDialogOpen}
+            title={`Documentação de ${selectedMaterial.type === 'entrega' ? 'Entrega' : 'Retirada'}`}
+            description={`Material: ${selectedMaterial.mat.name}`}
+            onSave={handleSaveSignature}
+          />
         )}
       </main>
     </div>

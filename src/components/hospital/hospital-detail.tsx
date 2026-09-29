@@ -281,24 +281,17 @@ function AddMaterialDialog({ hospitalId, hospitalName, section, stockType, userR
   const [status, setStatus] = useState("Aguardando");
   const [delivery, setDelivery] = useState<Date>();
   const [pickup, setPickup] = useState<Date>();
+  const [checklistFile, setChecklistFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const [showChecklist, setShowChecklist] = useState(false);
-  const [pendingMaterialId, setPendingMaterialId] = useState<string | null>(null);
 
   const isMotorista = userRole === "Motorista";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!name.trim() || !boxes) return;
-    // Apenas fecha o modal e abre a tela de documentação obrigatória
-    setOpen(false);
-    setShowChecklist(true);
-  }
-
-  const handleChecklistSave = async (result: ChecklistSignatureResult) => {
-    if (!user) return;
+    if (!name.trim() || !boxes || !user) return;
+    
     setSaving(true);
     
     try {
@@ -312,31 +305,22 @@ function AddMaterialDialog({ hospitalId, hospitalName, section, stockType, userR
         pickup: pickup ? format(pickup, "dd/MM/yyyy") : null,
         status,
         is_approved: !isMotorista,
-        created_by: user?.id || null,
+        created_by: user.id,
         pending_withdrawal_boxes: 0
       }]).select().single();
       
       if (error) throw error;
       
-      if (user) {
-        logAuditAction(user.id, hospitalId, name.trim(), 'Adição de Material', { material_id: data.id, boxes: Number(boxes), section, stockType });
-      }
+      logAuditAction(user.id, hospitalId, name.trim(), 'Adição de Material', { material_id: data.id, boxes: Number(boxes), section, stockType });
 
-      const pendingMaterialId = data.id;
-
-      if (result.photo) {
-        await uploadMaterialDocument(pendingMaterialId, user.id, 'foto', 'entrega', result.photo);
-      }
-      if (result.signature) {
-        await uploadMaterialDocument(pendingMaterialId, user.id, 'assinatura', 'entrega', result.signature);
-      }
-      if (result.checklistFile) {
-        await uploadMaterialDocument(pendingMaterialId, user.id, 'checklist', 'entrega', result.checklistFile);
+      if (checklistFile) {
+        await uploadMaterialDocument(data.id, user.id, 'checklist', 'entrega', checklistFile);
       }
       
-      setShowChecklist(false);
-      setName(""); setBoxes(""); setStatus("Aguardando"); setDelivery(undefined); setPickup(undefined);
+      setOpen(false);
+      setName(""); setBoxes(""); setStatus("Aguardando"); setDelivery(undefined); setPickup(undefined); setChecklistFile(null);
       queryClient.invalidateQueries({ queryKey: ['materials', hospitalId] });
+      queryClient.invalidateQueries({ queryKey: ['materials'] });
       
     } catch (err) {
       console.error(err);
@@ -344,7 +328,7 @@ function AddMaterialDialog({ hospitalId, hospitalName, section, stockType, userR
     } finally {
       setSaving(false);
     }
-  };
+  }
 
   const stockLabel = stockType === "transitorio" ? "Transitório" : "Consignado";
 
@@ -384,23 +368,31 @@ function AddMaterialDialog({ hospitalId, hospitalName, section, stockType, userR
             <div className="space-y-2"><Label>Data de Entrega</Label><DatePicker label="Data de entrega" value={delivery} onChange={setDelivery} /></div>
             <div className="space-y-2"><Label>Data de Retirada</Label><DatePicker label="Data de retirada" value={pickup} onChange={setPickup} /></div>
           </div>
-          <DialogFooter className="gap-2 border-t border-border pt-5"><DialogClose asChild><Button type="button" variant="outline" className="rounded-xl">Cancelar</Button></DialogClose><Button type="submit" disabled={saving} className="rounded-xl">{saving ? "Salvando..." : "Adicionar material"}</Button></DialogFooter>
+          
+          <div className="space-y-2">
+            <Label className="flex items-center gap-1.5"><FileText className="size-4" /> Checklist (Opcional)</Label>
+            <div className="flex items-center gap-2">
+              <Input 
+                type="file" 
+                accept=".pdf,.doc,.docx" 
+                onChange={(e) => setChecklistFile(e.target.files?.[0] || null)}
+                className="h-11 rounded-xl bg-card text-xs cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
+              />
+              {checklistFile && (
+                <Button type="button" variant="ghost" size="icon" onClick={() => setChecklistFile(null)} className="shrink-0 text-destructive">
+                  <XCircle className="size-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 border-t border-border pt-5">
+            <Button type="button" variant="outline" className="rounded-xl" onClick={() => setOpen(false)}>Cancelar</Button>
+            <Button type="submit" disabled={saving} className="rounded-xl">{saving ? "Salvando..." : "Adicionar material"}</Button>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
-    <ChecklistSignatureDialog 
-      open={showChecklist} 
-      onOpenChange={(val) => {
-        setShowChecklist(val);
-        if (!val) {
-          setName(""); setBoxes(""); setStatus("Aguardando"); setDelivery(undefined); setPickup(undefined);
-          queryClient.invalidateQueries({ queryKey: ['materials', hospitalId] });
-        }
-      }}
-      title="Documentação de Entrega"
-      description="Adicione fotos e assinatura para auditar a entrada deste material."
-      onSave={handleChecklistSave}
-    />
     </>
   );
 }
