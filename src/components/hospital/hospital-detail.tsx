@@ -198,6 +198,7 @@ function MaterialsTable({ materials, allHospitals, canApprove, onApprove, onWith
     return <div className="px-6 py-10 text-center text-sm text-muted-foreground">Nenhum material cadastrado nesta seção.</div>;
   }
   return (
+    <>
     <Table className="min-w-[720px]">
       <TableHeader>
         <TableRow className="border-border hover:bg-transparent">
