@@ -11,7 +11,7 @@ export type DeliverySignatureResult = {
   photos: File[];
   signatureDriver?: string; // base64
   signatureNurse: string; // base64
-  checklistFile: File | null;
+  checklistFiles: File[];
 };
 
 type Props = {
@@ -26,7 +26,7 @@ export function DeliverySignatureDialog({ open, onOpenChange, title, description
   const [photos, setPhotos] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [isCompressing, setIsCompressing] = useState(false);
-  const [checklistFile, setChecklistFile] = useState<File | null>(null);
+  const [checklistFiles, setChecklistFiles] = useState<File[]>([]);
   
   const isWithdrawal = title.toLowerCase().includes('retirada');
   
@@ -69,9 +69,14 @@ export function DeliverySignatureDialog({ open, onOpenChange, title, description
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setChecklistFile(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      const newFiles = Array.from(e.target.files);
+      setChecklistFiles(prev => [...prev, ...newFiles]);
     }
+  };
+
+  const removeChecklistFile = (index: number) => {
+    setChecklistFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleClearSignatureDriver = () => {
@@ -99,13 +104,13 @@ export function DeliverySignatureDialog({ open, onOpenChange, title, description
       photos,
       signatureDriver: signatureDriverBase64,
       signatureNurse: signatureNurseBase64!,
-      checklistFile,
+      checklistFiles,
     });
     
     // Reset state
     setPhotos([]);
     setPhotoPreviews([]);
-    setChecklistFile(null);
+    setChecklistFiles([]);
     sigDriverCanvas.current?.clear();
     sigNurseCanvas.current?.clear();
   };
@@ -174,16 +179,29 @@ export function DeliverySignatureDialog({ open, onOpenChange, title, description
               <div className="rounded-xl border border-dashed border-border/50 bg-muted/30 p-4 text-center transition-colors hover:bg-muted/50">
                 <Input 
                   type="file" 
+                  multiple
                   accept=".pdf,.doc,.docx" 
                   className="hidden" 
                   id="checklist-input-delivery"
                   onChange={handleFileChange}
                 />
                 <Label htmlFor="checklist-input-delivery" className="cursor-pointer flex flex-col items-center gap-2">
-                  {checklistFile ? (
-                    <div className="flex flex-col items-center gap-2">
-                      <FileText className="size-8 text-primary" />
-                      <span className="text-sm font-medium text-foreground break-all px-4">{checklistFile.name}</span>
+                  {checklistFiles.length > 0 ? (
+                    <div className="flex flex-col items-center gap-2 w-full">
+                      {checklistFiles.map((file, idx) => (
+                        <div key={idx} className="flex items-center justify-between w-full max-w-[280px] bg-background p-2 rounded-lg border border-border">
+                          <div className="flex items-center gap-2 overflow-hidden">
+                            <FileText className="size-4 text-primary shrink-0" />
+                            <span className="text-xs font-medium text-foreground truncate">{file.name}</span>
+                          </div>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:bg-destructive/10 shrink-0 ml-2" onClick={(e) => { e.preventDefault(); removeChecklistFile(idx); }}>
+                            <X className="size-3" />
+                          </Button>
+                        </div>
+                      ))}
+                      <div className="mt-2 flex items-center text-sm font-medium text-primary gap-1">
+                        <Plus className="size-4" /> Adicionar mais arquivos
+                      </div>
                     </div>
                   ) : (
                     <>
@@ -192,11 +210,6 @@ export function DeliverySignatureDialog({ open, onOpenChange, title, description
                     </>
                   )}
                 </Label>
-                {checklistFile && (
-                  <Button variant="ghost" size="sm" className="mt-2 text-destructive" onClick={() => setChecklistFile(null)}>
-                    Remover Arquivo
-                  </Button>
-                )}
               </div>
             </div>
           )}

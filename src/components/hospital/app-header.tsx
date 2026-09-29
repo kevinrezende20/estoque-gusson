@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { LogOut, Menu, PackageOpen, Settings, Truck, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
@@ -8,6 +10,7 @@ import { supabase } from "@/lib/supabase";
 export function AppHeader() {
   const { user, role, signOut } = useAuth();
   const navigate = useNavigate();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const handleLogout = async () => {
     await signOut();
@@ -85,7 +88,44 @@ export function AppHeader() {
             </Button>
           </div>
         </div>
-        <Button variant="ghost" size="icon" className="sm:hidden" aria-label="Abrir menu"><Menu /></Button>
+        <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
+          <SheetTrigger asChild>
+            <Button variant="ghost" size="icon" className="sm:hidden" aria-label="Abrir menu">
+              <Menu className="size-5" />
+            </Button>
+          </SheetTrigger>
+          <SheetContent side="right" className="w-[85vw] max-w-sm sm:max-w-md pt-12">
+            <nav className="flex flex-col gap-4 text-[15px] font-medium text-foreground">
+              <Link to="/" onClick={() => setIsMobileMenuOpen(false)} className="rounded-lg px-3 py-2 transition-colors hover:bg-muted">Locais</Link>
+              <Link to="/guias" onClick={() => setIsMobileMenuOpen(false)} className="rounded-lg px-3 py-2 transition-colors hover:bg-muted">Guias</Link>
+              <Link to="/arquivados" onClick={() => setIsMobileMenuOpen(false)} className="rounded-lg px-3 py-2 transition-colors hover:bg-muted">Arquivados</Link>
+              {(role === "Admin" || role === "Motorista") && (
+                <Link to="/entregas" onClick={() => setIsMobileMenuOpen(false)} className="rounded-lg px-3 py-2 transition-colors hover:bg-muted text-blue-500 flex items-center gap-2">
+                  <Truck className="size-4" /> Entregas
+                </Link>
+              )}
+              {role === "Admin" && (
+                <>
+                  <Link to="/relatorios" onClick={() => setIsMobileMenuOpen(false)} className="rounded-lg px-3 py-2 transition-colors hover:bg-muted">Relatórios</Link>
+                  <Link to="/admin/hospitais" onClick={() => setIsMobileMenuOpen(false)} className="rounded-lg px-3 py-2 transition-colors hover:bg-muted">Hospitais</Link>
+                  <Link to="/admin/usuarios" onClick={() => setIsMobileMenuOpen(false)} className="rounded-lg px-3 py-2 transition-colors hover:bg-muted flex items-center gap-2">
+                    <Settings className="size-4" /> Usuários
+                  </Link>
+                </>
+              )}
+            </nav>
+            <div className="mt-8 border-t border-border pt-6 flex items-center gap-3 px-3">
+              <span className="grid size-10 place-items-center rounded-full bg-accent/15 font-display text-[15px] font-bold text-accent">{initials}</span>
+              <div className="flex-1 leading-tight">
+                <p className="text-[14px] font-semibold">{displayName}</p>
+                <p className="text-[12px] text-muted-foreground">{role || 'Sem nível'}</p>
+              </div>
+              <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => { setIsMobileMenuOpen(false); handleLogout(); }} title="Sair">
+                <LogOut className="size-5" />
+              </Button>
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
     </header>
   );

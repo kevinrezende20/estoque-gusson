@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { DeliverySignatureDialog, type DeliverySignatureResult } from "@/components/hospital/DeliverySignatureDialog";
-
+import { MaterialDocumentsDialog } from "@/components/hospital/MaterialDocumentsDialog";
 export const Route = createFileRoute("/entregas")({
   beforeLoad: async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -116,8 +116,10 @@ function EntregasPage() {
         await uploadMaterialDocument(mat.id, user.id, 'assinatura', type, result.signatureNurse); 
       }
 
-      if (result.checklistFile) {
-        await uploadMaterialDocument(mat.id, user.id, 'checklist', type, result.checklistFile);
+      if (result.checklistFiles && result.checklistFiles.length > 0) {
+        for (const file of result.checklistFiles) {
+          await uploadMaterialDocument(mat.id, user.id, 'checklist', type, file);
+        }
       }
 
       const { error } = await supabase.from('materials').update({ status: 'Pendente de verificação' }).eq('id', mat.id);
@@ -217,23 +219,26 @@ function EntregasPage() {
                           </p>
                         </div>
                         
-                        <Button 
-                          onClick={() => handleActionClick(mat, isEntrega ? 'entrega' : 'retirada')}
-                          disabled={isProcessing === mat.id || isPendenteVerificacao}
-                          variant={isPendenteVerificacao ? "outline" : "default"}
-                          className={`w-full sm:w-auto shadow-sm ${!isPendenteVerificacao && (isEntrega ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-orange-600 hover:bg-orange-700 text-white')}`}
-                        >
-                          {isProcessing === mat.id ? (
-                            <><Loader2 className="size-4 mr-2 animate-spin" /> Processando...</>
-                          ) : isPendenteVerificacao ? (
-                            <><Loader2 className="size-4 mr-2" /> Pendente de verificação</>
-                          ) : (
-                            <>
-                              <Upload className="size-4 mr-2" />
-                              {isEntrega ? 'Confirmar Entrega' : 'Confirmar Retirada'}
-                            </>
-                          )}
-                        </Button>
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mt-3 sm:mt-0">
+                          <MaterialDocumentsDialog materialId={mat.id} materialName={mat.name} />
+                          <Button 
+                            onClick={() => handleActionClick(mat, isEntrega ? 'entrega' : 'retirada')}
+                            disabled={isProcessing === mat.id || isPendenteVerificacao}
+                            variant={isPendenteVerificacao ? "outline" : "default"}
+                            className={`w-full sm:w-auto shadow-sm ${!isPendenteVerificacao && (isEntrega ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-orange-600 hover:bg-orange-700 text-white')}`}
+                          >
+                            {isProcessing === mat.id ? (
+                              <><Loader2 className="size-4 mr-2 animate-spin" /> Processando...</>
+                            ) : isPendenteVerificacao ? (
+                              <><Loader2 className="size-4 mr-2" /> Pendente de verificação</>
+                            ) : (
+                              <>
+                                <Upload className="size-4 mr-2" />
+                                {isEntrega ? 'Confirmar Entrega' : 'Confirmar Retirada'}
+                              </>
+                            )}
+                          </Button>
+                        </div>
                       </div>
                     )
                   })}

@@ -5,12 +5,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Camera, Eraser, Check, FileUp, FileText, Loader2 } from "lucide-react";
+import { Camera, Eraser, Check, FileUp, FileText, Loader2, X, Plus } from "lucide-react";
 
 export type ChecklistSignatureResult = {
   photo: File;
   signature: string; // base64
-  checklistFile: File;
+  checklistFiles: File[];
 };
 
 type Props = {
@@ -18,14 +18,15 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   title: string;
   description: string;
+  requireChecklist?: boolean;
   onSave: (result: ChecklistSignatureResult) => void;
 };
 
-export function ChecklistSignatureDialog({ open, onOpenChange, title, description, onSave }: Props) {
+export function ChecklistSignatureDialog({ open, onOpenChange, title, description, requireChecklist = true, onSave }: Props) {
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [isCompressing, setIsCompressing] = useState(false);
-  const [checklistFile, setChecklistFile] = useState<File | null>(null);
+  const [checklistFiles, setChecklistFiles] = useState<File[]>([]);
   
   const sigCanvas = useRef<SignatureCanvas>(null);
 
@@ -56,9 +57,14 @@ export function ChecklistSignatureDialog({ open, onOpenChange, title, descriptio
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setChecklistFile(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      const newFiles = Array.from(e.target.files);
+      setChecklistFiles(prev => [...prev, ...newFiles]);
     }
+  };
+
+  const removeChecklistFile = (index: number) => {
+    setChecklistFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleClearSignature = () => {
@@ -66,7 +72,8 @@ export function ChecklistSignatureDialog({ open, onOpenChange, title, descriptio
   };
 
   const isFormValid = () => {
-    return photo !== null && checklistFile !== null && sigCanvas.current && !sigCanvas.current.isEmpty();
+    const checklistValid = requireChecklist ? checklistFiles.length > 0 : true;
+    return photo !== null && checklistValid && sigCanvas.current && !sigCanvas.current.isEmpty();
   };
 
   const handleSave = () => {
@@ -77,13 +84,13 @@ export function ChecklistSignatureDialog({ open, onOpenChange, title, descriptio
     onSave({
       photo: photo!,
       signature: signatureBase64!,
-      checklistFile: checklistFile!,
+      checklistFiles: checklistFiles,
     });
     
     // Reset state
     setPhoto(null);
     setPhotoPreview(null);
-    setChecklistFile(null);
+    setChecklistFiles([]);
     sigCanvas.current?.clear();
   };
 
@@ -135,21 +142,35 @@ export function ChecklistSignatureDialog({ open, onOpenChange, title, descriptio
           </div>
 
           {/* ARQUIVO CHECKLIST */}
-          <div className="space-y-3">
-            <Label className="text-base font-semibold">2. Arquivo de Checklist (Obrigatório)</Label>
+          {requireChecklist && (
+            <div className="space-y-3">
+              <Label className="text-base font-semibold">2. Arquivo de Checklist (Obrigatório)</Label>
             <div className="rounded-xl border border-dashed border-border/50 bg-muted/30 p-4 text-center transition-colors hover:bg-muted/50">
               <Input 
                 type="file" 
+                multiple
                 accept=".pdf,.doc,.docx" 
                 className="hidden" 
                 id="checklist-input"
                 onChange={handleFileChange}
               />
               <Label htmlFor="checklist-input" className="cursor-pointer flex flex-col items-center gap-2">
-                {checklistFile ? (
-                  <div className="flex flex-col items-center gap-2">
-                    <FileText className="size-8 text-primary" />
-                    <span className="text-sm font-medium text-foreground break-all px-4">{checklistFile.name}</span>
+                {checklistFiles.length > 0 ? (
+                  <div className="flex flex-col items-center gap-2 w-full">
+                    {checklistFiles.map((file, idx) => (
+                      <div key={idx} className="flex items-center justify-between w-full max-w-[280px] bg-background p-2 rounded-lg border border-border">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <FileText className="size-4 text-primary shrink-0" />
+                          <span className="text-xs font-medium text-foreground truncate">{file.name}</span>
+                        </div>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:bg-destructive/10 shrink-0 ml-2" onClick={(e) => { e.preventDefault(); removeChecklistFile(idx); }}>
+                          <X className="size-3" />
+                        </Button>
+                      </div>
+                    ))}
+                    <div className="mt-2 flex items-center text-sm font-medium text-primary gap-1">
+                      <Plus className="size-4" /> Adicionar mais arquivos
+                    </div>
                   </div>
                 ) : (
                   <>
@@ -158,18 +179,14 @@ export function ChecklistSignatureDialog({ open, onOpenChange, title, descriptio
                   </>
                 )}
               </Label>
-              {checklistFile && (
-                <Button variant="ghost" size="sm" className="mt-2 text-destructive" onClick={() => setChecklistFile(null)}>
-                  Remover Arquivo
-                </Button>
-              )}
             </div>
           </div>
+          )}
 
           {/* ASSINATURA */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <Label className="text-base font-semibold">3. Assinatura Digital (Obrigatório)</Label>
+              <Label className="text-base font-semibold">{requireChecklist ? "3" : "2"}. Assinatura Digital (Obrigatório)</Label>
               <Button type="button" variant="ghost" size="sm" onClick={handleClearSignature} className="h-8 text-xs text-muted-foreground">
                 <Eraser className="size-3 mr-1" /> Limpar
               </Button>

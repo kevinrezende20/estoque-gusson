@@ -65,8 +65,10 @@ function WithdrawMaterialDialog({ material, allHospitals, onWithdraw }: { materi
     if (result.signature) {
       await uploadMaterialDocument(material.id, user.id, 'assinatura', 'retirada', result.signature);
     }
-    if (result.checklistFile) {
-      await uploadMaterialDocument(material.id, user.id, 'checklist', 'retirada', result.checklistFile);
+    if (result.checklistFiles && result.checklistFiles.length > 0) {
+      for (const file of result.checklistFiles) {
+        await uploadMaterialDocument(material.id, user.id, 'checklist', 'retirada', file);
+      }
     }
 
     setShowChecklist(false);
@@ -138,6 +140,7 @@ function WithdrawMaterialDialog({ material, allHospitals, onWithdraw }: { materi
     <ChecklistSignatureDialog 
       open={showChecklist} 
       onOpenChange={setShowChecklist}
+      requireChecklist={false}
       title="Documentação de Retirada"
       description="Adicione fotos e assinatura para auditar a saída deste material."
       onSave={handleChecklistSave}
