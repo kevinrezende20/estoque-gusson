@@ -21,9 +21,9 @@ export function exportGlobalReportAsPdf(logs: any[], hospitals: any[]) {
     
     // Tratando action details
     let detailsStr = '';
-    if (log.action === 'Retirada de Material' && log.details) {
+    if (log.action_type === 'Retirada de Material' && log.details) {
       detailsStr = `${log.details.boxes} cx(s) -> ${log.details.reason === 'hospital' ? 'Outro Hospital' : 'Estoque'}`;
-    } else if (log.action === 'Aprovação de Material' || log.action === 'Adição de Material') {
+    } else if (log.action_type === 'Aprovação de Material' || log.action_type === 'Adição de Material') {
       detailsStr = log.details?.boxes ? `${log.details.boxes} cx(s)` : '-';
     }
     
@@ -31,8 +31,8 @@ export function exportGlobalReportAsPdf(logs: any[], hospitals: any[]) {
       date,
       hospital?.name || 'Desconhecido',
       log.material_name || '-',
-      log.action,
-      log.user_email?.split('@')[0] || 'Sistema',
+      log.action_type,
+      log.user_email?.split('@')[0] || log.users?.email?.split('@')[0] || 'Sistema',
       detailsStr
     ];
   });
@@ -88,9 +88,33 @@ export async function exportMaterialReceiptAsPdf(materialName: string, documents
         // Para adicionar imagem no PDF precisamos baixar ela como blob e transformar em base64
         const img = await fetchImageBase64(docItem.file_url);
         if (img) {
-          const width = docItem.document_type === 'foto' ? 100 : 80;
-          const height = docItem.document_type === 'foto' ? 75 : 40;
-          doc.addImage(img, 'JPEG', 14, currentY, width, height);
+          const dims = await getImageDimensions(img);
+          
+          let width = docItem.document_type === 'foto' ? 100 : 80;
+          let height = docItem.document_type === 'foto' ? 75 : 40;
+
+          if (dims.width && dims.height) {
+            const ratio = dims.width / dims.height;
+            const maxWidth = docItem.document_type === 'foto' ? 140 : 80;
+            const maxHeight = docItem.document_type === 'foto' ? 140 : 40;
+            
+            width = maxWidth;
+            height = width / ratio;
+            
+            if (height > maxHeight) {
+              height = maxHeight;
+              width = height * ratio;
+            }
+          }
+
+          // Se a imagem não couber na página atual, cria uma nova página antes de inserir
+          if (currentY + height > 280) {
+            doc.addPage();
+            currentY = 20;
+          }
+
+          const format = img.startsWith('data:image/png') ? 'PNG' : 'JPEG';
+          doc.addImage(img, format, 14, currentY, width, height);
           currentY += height + 10;
         }
       } catch (e) {
@@ -128,4 +152,14 @@ async function fetchImageBase64(url: string): Promise<string | null> {
     console.error("Failed to load image for PDF", e);
     return null;
   }
+}
+
+// Helper para pegar dimensões da imagem e calcular proporção correta
+function getImageDimensions(dataUrl: string): Promise<{ width: number, height: number }> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.width, height: img.height });
+    img.onerror = () => resolve({ width: 0, height: 0 });
+    img.src = dataUrl;
+  });
 }

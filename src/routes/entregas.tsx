@@ -128,11 +128,15 @@ function EntregasPage() {
       logAuditAction(user.id, mat.hospital_id, mat.name, `Verificação de ${type === 'entrega' ? 'Entrega' : 'Retirada'} (Motorista)`, { boxes: mat.boxes });
 
       queryClient.invalidateQueries({ queryKey: ['materials_transit'] });
+      
+      // Fechar modal apenas se der sucesso
+      setSelectedMaterial(null);
+      setDialogOpen(false);
     } catch (err: any) {
+      console.error(err);
       alert("Erro ao confirmar e enviar documentos: " + err.message);
     } finally {
       setIsProcessing(null);
-      setSelectedMaterial(null);
     }
   };
 

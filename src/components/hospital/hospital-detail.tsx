@@ -9,6 +9,7 @@ import { DeliverySignatureDialog, type DeliverySignatureResult } from "./Deliver
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -149,7 +150,7 @@ function WithdrawMaterialDialog({ material, allHospitals, onWithdraw }: { materi
   );
 }
 
-function MaterialsTable({ materials, allHospitals, canApprove, onApprove, onWithdraw, onApproveWithdraw }: { 
+function MaterialsTable({ materials, allHospitals, canApprove, onApprove, onWithdraw, onApproveWithdraw, onStandby, onDelete }: { 
   materials: DBMaterial[]; 
   allHospitals: DBHospital[];
   canApprove: boolean; 
@@ -178,8 +179,10 @@ function MaterialsTable({ materials, allHospitals, canApprove, onApprove, onWith
       if (result.signatureNurse) {
         await uploadMaterialDocument(signatureMat.id, user.id, 'assinatura', type, result.signatureNurse); 
       }
-      if (result.checklistFile) {
-        await uploadMaterialDocument(signatureMat.id, user.id, 'checklist', type, result.checklistFile);
+      if (result.checklistFiles && result.checklistFiles.length > 0) {
+        for (const file of result.checklistFiles) {
+          await uploadMaterialDocument(signatureMat.id, user.id, 'checklist', type, file);
+        }
       }
 
       // Always change to 'Pendente de verificação' so Admin reviews it
@@ -189,11 +192,12 @@ function MaterialsTable({ materials, allHospitals, canApprove, onApprove, onWith
       logAuditAction(user.id, signatureMat.hospital_id, signatureMat.name, `Anexo de Documentos (${signatureMat.status === 'Em trânsito' ? 'Confirmação de Entrega' : 'Documentação Extra'})`, { boxes: signatureMat.boxes });
       queryClient.invalidateQueries({ queryKey: ['materials'] });
 
-    } catch (err: any) {
-      alert("Erro ao enviar documentos: " + err.message);
-    } finally {
+      // Fechar modal apenas no sucesso
       setSignatureOpen(false);
       setSignatureMat(null);
+    } catch (err: any) {
+      console.error(err);
+      alert("Erro ao enviar documentos: " + err.message);
     }
   };
 
@@ -352,7 +356,7 @@ function AddMaterialDialog({ hospitalId, hospitalName, section, stockType, userR
   const [status, setStatus] = useState("Aguardando");
   const [delivery, setDelivery] = useState<Date>();
   const [pickup, setPickup] = useState<Date>();
-  const [checklistFile, setChecklistFile] = useState<File | null>(null);
+  const [checklistFiles, setChecklistFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -384,12 +388,14 @@ function AddMaterialDialog({ hospitalId, hospitalName, section, stockType, userR
       
       logAuditAction(user.id, hospitalId, name.trim(), 'Adição de Material', { material_id: data.id, boxes: Number(boxes), section, stockType });
 
-      if (checklistFile) {
-        await uploadMaterialDocument(data.id, user.id, 'checklist', 'entrega', checklistFile);
+      if (checklistFiles.length > 0) {
+        for (const file of checklistFiles) {
+          await uploadMaterialDocument(data.id, user.id, 'checklist', 'entrega', file);
+        }
       }
       
       setOpen(false);
-      setName(""); setBoxes(""); setStatus("Aguardando"); setDelivery(undefined); setPickup(undefined); setChecklistFile(null);
+      setName(""); setBoxes(""); setStatus("Aguardando"); setDelivery(undefined); setPickup(undefined); setChecklistFiles([]);
       queryClient.invalidateQueries({ queryKey: ['materials', hospitalId] });
       queryClient.invalidateQueries({ queryKey: ['materials'] });
       
@@ -441,18 +447,30 @@ function AddMaterialDialog({ hospitalId, hospitalName, section, stockType, userR
           </div>
           
           <div className="space-y-2">
-            <Label className="flex items-center gap-1.5"><FileText className="size-4" /> Checklist (Opcional)</Label>
-            <div className="flex items-center gap-2">
+            <Label className="flex items-center gap-1.5"><FileText className="size-4" /> Checklists (Opcional)</Label>
+            <div className="space-y-2">
               <Input 
                 type="file" 
-                accept=".pdf,.doc,.docx" 
-                onChange={(e) => setChecklistFile(e.target.files?.[0] || null)}
+                multiple
+                accept="image/*,.pdf,.doc,.docx" 
+                onChange={(e) => {
+                  if (e.target.files) {
+                    setChecklistFiles(prev => [...prev, ...Array.from(e.target.files!)]);
+                  }
+                }}
                 className="h-11 rounded-xl bg-card text-xs cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
               />
-              {checklistFile && (
-                <Button type="button" variant="ghost" size="icon" onClick={() => setChecklistFile(null)} className="shrink-0 text-destructive">
-                  <XCircle className="size-4" />
-                </Button>
+              {checklistFiles.length > 0 && (
+                <div className="flex flex-col gap-2 mt-2">
+                  {checklistFiles.map((file, idx) => (
+                    <div key={idx} className="flex items-center justify-between bg-muted/50 px-3 py-2 rounded-lg text-sm">
+                      <span className="truncate max-w-[200px]">{file.name}</span>
+                      <Button type="button" variant="ghost" size="icon" onClick={() => setChecklistFiles(prev => prev.filter((_, i) => i !== idx))} className="shrink-0 text-destructive size-7">
+                        <XCircle className="size-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </div>
@@ -499,6 +517,8 @@ export function HospitalDetail({ hospitalId }: { hospitalId: string }) {
   const [activeSection, setActiveSection] = useState<"CME" | "OPME">("CME");
   const [standbyMaterialId, setStandbyMaterialId] = useState<string | null>(null);
   const [standbyComment, setStandbyComment] = useState("");
+  const [deleteMaterialId, setDeleteMaterialId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const handleStandby = async () => {
     if (!standbyMaterialId) return;
@@ -528,19 +548,38 @@ export function HospitalDetail({ hospitalId }: { hospitalId: string }) {
   const canApprove = ['Admin', 'Estoque', 'Conferente'].includes(role || '');
   const isMotorista = role === "Motorista";
 
-  const handleDelete = async (materialId: string) => {
-    if (role !== 'Admin') return;
-    if (!confirm("Tem certeza que deseja excluir este material permanentemente?")) return;
+  const handleDeleteClick = (materialId: string) => {
+    setDeleteMaterialId(materialId);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (role !== 'Admin' || !deleteMaterialId) return;
     
-    const material = allMaterials.find(m => m.id === materialId);
-    const { error } = await supabase.from('materials').delete().eq('id', materialId);
-    
-    if (error) {
-      alert("Erro ao excluir: " + error.message);
-    } else {
-      if (user && material) logAuditAction(user.id, hospitalId, material.name, 'Exclusão de Material (Admin)', { boxes: material.boxes });
-      queryClient.invalidateQueries({ queryKey: ['materials', hospitalId] });
-      queryClient.invalidateQueries({ queryKey: ['materials'] });
+    setIsDeleting(true);
+    try {
+      console.log("Tentando excluir material:", deleteMaterialId);
+      const material = allMaterials.find(m => m.id === deleteMaterialId);
+      
+      const { data, error } = await supabase.from('materials').delete().eq('id', deleteMaterialId).select();
+      console.log("Resultado da exclusão:", { data, error });
+      
+      if (error) {
+        alert("Erro ao excluir: " + error.message);
+      } else if (!data || data.length === 0) {
+        alert("Nenhum material foi excluído. Isso pode ocorrer se a política de segurança (RLS) não foi configurada corretamente no Supabase. O banco não permitiu a exclusão.");
+      } else {
+        if (user && material) logAuditAction(user.id, hospitalId, material.name, 'Exclusão de Material (Admin)', { boxes: material.boxes });
+        queryClient.invalidateQueries({ queryKey: ['materials', hospitalId] });
+        queryClient.invalidateQueries({ queryKey: ['materials'] });
+        
+        setDeleteMaterialId(null);
+        alert("Material excluído com sucesso!");
+      }
+    } catch (err: any) {
+      console.error("Exceção capturada no handleConfirmDelete:", err);
+      alert("Ocorreu um erro inesperado: " + err.message);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -700,6 +739,7 @@ export function HospitalDetail({ hospitalId }: { hospitalId: string }) {
   const totalPending = allMaterials.filter(m => !m.is_approved || m.pending_withdrawal_boxes > 0).length;
 
   return (
+    <>
     <main className="page-enter mx-auto max-w-6xl space-y-7 px-4 py-6 sm:px-6 sm:py-8">
       <Link to="/" className="inline-flex items-center gap-2 text-[13px] font-medium text-muted-foreground transition-colors hover:text-primary"><ChevronLeft className="size-4" />Voltar para locais</Link>
 
@@ -782,7 +822,7 @@ export function HospitalDetail({ hospitalId }: { hospitalId: string }) {
               onWithdraw={handleWithdrawRequest}
               onApproveWithdraw={handleApproveWithdraw}
               onStandby={setStandbyMaterialId}
-              onDelete={handleDelete}
+              onDelete={handleDeleteClick}
             />
             <StockSection
               hospitalId={hospitalId}
@@ -797,7 +837,7 @@ export function HospitalDetail({ hospitalId }: { hospitalId: string }) {
               onWithdraw={handleWithdrawRequest}
               onApproveWithdraw={handleApproveWithdraw}
               onStandby={setStandbyMaterialId}
-              onDelete={handleDelete}
+              onDelete={handleDeleteClick}
             />
           </TabsContent>
           );
@@ -827,5 +867,25 @@ export function HospitalDetail({ hospitalId }: { hospitalId: string }) {
         </DialogContent>
       </Dialog>
     </main>
+
+    <Dialog open={!!deleteMaterialId} onOpenChange={(open) => !open && !isDeleting && setDeleteMaterialId(null)}>
+      <DialogContent className="sm:max-w-md rounded-2xl border-border bg-popover/95 p-6 backdrop-blur-xl">
+        <DialogHeader>
+          <DialogTitle className="font-display">Tem certeza absoluta?</DialogTitle>
+          <DialogDescription>
+            Essa ação não pode ser desfeita. Isso excluirá permanentemente o material selecionado do sistema.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="mt-4 gap-2">
+          <Button variant="outline" className="rounded-xl" onClick={() => setDeleteMaterialId(null)} disabled={isDeleting}>
+            Cancelar
+          </Button>
+          <Button variant="destructive" className="rounded-xl" onClick={handleConfirmDelete} disabled={isDeleting}>
+            {isDeleting ? "Excluindo..." : "Sim, excluir material"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

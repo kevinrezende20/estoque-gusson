@@ -19,7 +19,7 @@ type Props = {
   title: string;
   description: string;
   requireChecklist?: boolean;
-  onSave: (result: ChecklistSignatureResult) => void;
+  onSave: (result: ChecklistSignatureResult) => Promise<void>;
 };
 
 export function ChecklistSignatureDialog({ open, onOpenChange, title, description, requireChecklist = true, onSave }: Props) {
@@ -76,22 +76,34 @@ export function ChecklistSignatureDialog({ open, onOpenChange, title, descriptio
     return photo !== null && checklistValid && sigCanvas.current && !sigCanvas.current.isEmpty();
   };
 
-  const handleSave = () => {
-    if (!isFormValid()) return;
+  const [errorMsg, setErrorMsg] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
-    const signatureBase64 = sigCanvas.current?.getTrimmedCanvas().toDataURL('image/png');
-    
-    onSave({
-      photo: photo!,
-      signature: signatureBase64!,
-      checklistFiles: checklistFiles,
-    });
-    
-    // Reset state
-    setPhoto(null);
-    setPhotoPreview(null);
-    setChecklistFiles([]);
-    sigCanvas.current?.clear();
+  const handleSave = async () => {
+    setErrorMsg("");
+    if (!isFormValid()) {
+      setErrorMsg("Por favor, preencha todos os campos obrigatórios (foto, assinatura e checklist se exigido).");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const signatureBase64 = sigCanvas.current?.getCanvas().toDataURL('image/png');
+      
+      await onSave({
+        photo: photo!,
+        signature: signatureBase64!,
+        checklistFiles: checklistFiles,
+      });
+      
+      // Reset state
+      setPhoto(null);
+      setPhotoPreview(null);
+      setChecklistFiles([]);
+      sigCanvas.current?.clear();
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -149,7 +161,7 @@ export function ChecklistSignatureDialog({ open, onOpenChange, title, descriptio
               <Input 
                 type="file" 
                 multiple
-                accept=".pdf,.doc,.docx" 
+                accept="image/*,.pdf,.doc,.docx" 
                 className="hidden" 
                 id="checklist-input"
                 onChange={handleFileChange}
@@ -203,11 +215,19 @@ export function ChecklistSignatureDialog({ open, onOpenChange, title, descriptio
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-4 bg-muted/20">
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={handleSave} disabled={!isFormValid()} className="shadow-sm shadow-primary/30">
-            <Check className="size-4 mr-2" /> Salvar e Continuar
-          </Button>
+        <div className="flex flex-col gap-3 border-t border-border px-6 py-4 bg-muted/20">
+          {errorMsg && (
+            <div className="text-sm text-destructive font-medium bg-destructive/10 p-3 rounded-lg text-center">
+              {errorMsg}
+            </div>
+          )}
+          <div className="flex items-center justify-end gap-3 w-full">
+            <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isSaving}>Cancelar</Button>
+            <Button onClick={handleSave} disabled={isCompressing || isSaving} className="shadow-sm shadow-primary/30">
+              {(isCompressing || isSaving) ? <Loader2 className="size-4 animate-spin mr-2" /> : <Check className="size-4 mr-2" />} 
+              {isSaving ? "Enviando..." : "Salvar e Continuar"}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

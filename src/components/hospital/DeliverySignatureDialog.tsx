@@ -19,7 +19,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   title: string;
   description: string;
-  onSave: (result: DeliverySignatureResult) => void;
+  onSave: (result: DeliverySignatureResult) => Promise<void>;
 };
 
 export function DeliverySignatureDialog({ open, onOpenChange, title, description, onSave }: Props) {
@@ -94,25 +94,38 @@ export function DeliverySignatureDialog({ open, onOpenChange, title, description
            sigNurseCanvas.current && !sigNurseCanvas.current.isEmpty();
   };
 
-  const handleSave = () => {
-    if (!isFormValid()) return;
+  const [errorMsg, setErrorMsg] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
-    const signatureDriverBase64 = !isWithdrawal ? sigDriverCanvas.current?.getTrimmedCanvas().toDataURL('image/png') : undefined;
-    const signatureNurseBase64 = sigNurseCanvas.current?.getTrimmedCanvas().toDataURL('image/png');
-    
-    onSave({
-      photos,
-      signatureDriver: signatureDriverBase64,
-      signatureNurse: signatureNurseBase64!,
-      checklistFiles,
-    });
-    
-    // Reset state
-    setPhotos([]);
-    setPhotoPreviews([]);
-    setChecklistFiles([]);
-    sigDriverCanvas.current?.clear();
-    sigNurseCanvas.current?.clear();
+  const handleSave = async () => {
+    setErrorMsg("");
+    if (!isFormValid()) {
+      setErrorMsg("Por favor, preencha todos os campos obrigatórios (fotos e assinaturas).");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const signatureDriverBase64 = !isWithdrawal ? sigDriverCanvas.current?.getCanvas().toDataURL('image/png') : undefined;
+      const signatureNurseBase64 = sigNurseCanvas.current?.getCanvas().toDataURL('image/png');
+      
+      await onSave({
+        photos,
+        signatureDriver: signatureDriverBase64,
+        signatureNurse: signatureNurseBase64!,
+        checklistFiles,
+      });
+      
+      // Reset state ONLY IF onSave succeeds and the dialog is actually staying open, 
+      // but usually the parent closes the dialog anyway.
+      setPhotos([]);
+      setPhotoPreviews([]);
+      setChecklistFiles([]);
+      sigDriverCanvas.current?.clear();
+      sigNurseCanvas.current?.clear();
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -180,7 +193,7 @@ export function DeliverySignatureDialog({ open, onOpenChange, title, description
                 <Input 
                   type="file" 
                   multiple
-                  accept=".pdf,.doc,.docx" 
+                  accept="image/*,.pdf,.doc,.docx" 
                   className="hidden" 
                   id="checklist-input-delivery"
                   onChange={handleFileChange}
@@ -258,11 +271,19 @@ export function DeliverySignatureDialog({ open, onOpenChange, title, description
 
         </div>
 
-        <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-4 bg-muted/20">
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={handleSave} disabled={!isFormValid()} className="shadow-sm shadow-primary/30">
-            <Check className="size-4 mr-2" /> Salvar e Enviar para Verificação
-          </Button>
+        <div className="flex flex-col gap-3 border-t border-border px-6 py-4 bg-muted/20">
+          {errorMsg && (
+            <div className="text-sm text-destructive font-medium bg-destructive/10 p-3 rounded-lg text-center">
+              {errorMsg}
+            </div>
+          )}
+          <div className="flex items-center justify-end gap-3 w-full">
+            <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isSaving}>Cancelar</Button>
+            <Button onClick={handleSave} disabled={isCompressing || isSaving} className="shadow-sm shadow-primary/30">
+              {(isCompressing || isSaving) ? <Loader2 className="size-4 animate-spin mr-2" /> : <Check className="size-4 mr-2" />} 
+              {isSaving ? "Enviando..." : "Salvar e Enviar para Verificação"}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

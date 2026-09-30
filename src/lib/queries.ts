@@ -101,13 +101,28 @@ export function useAuditLogs() {
   return useQuery({
     queryKey: ['audit_logs'],
     queryFn: async () => {
-      // Puxa também os dados do usuário para mostrar o nome/email na linha do tempo
-      const { data, error } = await supabase.from('audit_logs').select(`
-        *,
-        users:user_id (email)
-      `).order('created_at', { ascending: false });
-      if (error) throw error;
-      return data as (DBAuditLog & { users?: { email: string } })[];
+      const { data: logsData, error: logsError } = await supabase
+        .from('audit_logs')
+        .select('*')
+        .order('created_at', { ascending: false });
+        
+      if (logsError) throw logsError;
+
+      // Buscar emails dos usuários através da view admin_users_view
+      const { data: usersData, error: usersError } = await supabase
+        .from('admin_users_view')
+        .select('id, email, display_name');
+        
+      if (usersError) throw usersError;
+
+      // Fazer o merge no lado do cliente
+      return logsData.map(log => {
+        const user = usersData?.find(u => u.id === log.user_id);
+        return {
+          ...log,
+          users: { email: user?.display_name || user?.email || 'Usuário Desconhecido' }
+        };
+      }) as (DBAuditLog & { users?: { email: string } })[];
     }
   });
 }
@@ -149,7 +164,7 @@ export async function uploadMaterialDocument(
   checklistData: Record<string, boolean> = {}
 ) {
   try {
-    let filePath = `${materialId}/${context}_${docType}_${Date.now()}`;
+    let filePath = `${materialId}/${context}_${docType}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     let fileBody: any = file;
     let contentType = 'application/octet-stream';
     
